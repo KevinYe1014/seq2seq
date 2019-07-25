@@ -1,0 +1,196 @@
+DataPreprocess.py
+【10】加载reviews数据。 shape (568454, 10) 形式如下
+'''
+Id                                            1
+ProductId                            B001E4KFG0
+UserId                           A3SGXH7AUHU8GW
+ProfileName                          delmartian
+HelpfulnessNumerator                          1
+HelpfulnessDenominator                        1
+Score                                         5
+Time                                 1303862400
+Summary                   Good Quality Dog Food
+Name: 0, dtype: object 
+ I have bought several of the Vitality canned ...
+'''
+
+【31】 isnull 输出结果如下： 
+'''
+Id                         0
+ProductId                  0
+UserId                     0
+ProfileName               16
+HelpfulnessNumerator       0
+HelpfulnessDenominator     0
+Score                      0
+Time                       0
+Summary                   27
+Text                       0
+'''
+
+【47】 dropna之后 （568411, 10）
+【51】去除多余指标之后：	reviews
+ Summary: Good Quality Dog Food
+ Text: I have bought several of the Vitality ...
+ 
+【141】进行清理。
+stopwords.word('english') # 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 
+summary: 将isn't 改为 is not 将不规则字符改为 ''
+text: 在上面基础上去掉上面stopwords
+
+【237】上面数据进行保存，然后再次读取。
+上面保存为Reviews_Clean.csv 其中有Text 和 Summary 
+clean_texts是：[568410] 列表
+clean_summaries是：[568410] 列表 每个元素都是 一句话
+
+【257】统计词频，每个词出现的频率。
+word_counts 字典 good：251402 等
+有 145369 个词。
+
+【277】词向量字典。embeddings_index其中
+键是单词，值是300个元素的tuple。 418082 个
+比如：'good':(1.0, 2.0, 3.0, 0.21, .... )
+
+【281】有在word_counts中 但是不在 词向量字典embeddings_index中的
+并且个数有20个以上的， 有 4229个
+
+【297】vocabs_to_int 字典是这样的。 'good':0  'bad':1 等
+要求的是在embeddings_index中或者词频大于20  长度是 60446
+再加上 ['<UNK>', '<PAD>', '<EOS>', '<GO>'] 长度是 60450
+
+【309】int_to_vocabs 是上面 vocabs_to_int 反过来的。 长度是 60450
+
+【314】目前小结：总的词个数有145369 但是用到的词个数是：60450个
+
+【339】word_embedding_matrix 是 数组[60450, 300]的 词向量矩阵
+ 同时这个 i：0 -> 60449 对应关系和 vocabs_to_int是一致的。
+ 然后将 word_embedding_matrix 作为文件保存起来。
+ 
+【407】统计：
+clean_summaries：中有 word_count:2376944 unk_count: 16904 
+	int_summaries：是[[1, 3],[...], [...]]是summary中每个句子索引列表。其中肯定只在vocabs_to_int中的才算。长度是568410
+clean_texts：中有word_count：上面和此和26481762  unk_count：219797
+	int_texts：同上，长度 568410
+
+【425】lengths_summaries 是DataFrame 只有一列 counts 其中行为 clean_summaries中每行个数
+		lengths_texts 同上。568410 行数
+
+【481】对int_summaries 和 int_texts 进行筛选。 对长度大小，以及unk 大小进行筛选。其阈值是通过分位数确定的，备注text是按照顺序来的，而summary是按照text来的。
+得出：
+sorted_summaries：是int_summaries的部分，个数有 420581
+sorted_texts：同样，是int_texts的部分，个数有  420581
+ 
+ 
+ 
+ 
+ 
+ 
+ Mysummarize_reviews.py文件总结
+ 
+【235】先设定一些初始值：
+epochs = 100
+batch_size = 64
+rnn_size = 256
+num_layers = 2
+learning_rate = 0.005
+keep_probability = 0.75
+
+【247】
+输入：input_data, targets, lr, keep_prob, summary_length, max_summary_length, text_length = model_inputs()
+说明：input_data (?, ?) targets (?, ?) lr 常数  keep_prob 常数 
+	  summary_length (?, ) max_summary_length 常数  text_length (?, )
+	  
+【193】enc_embed_input 是输入 映射在 词向量矩阵上的 (?, ?, 300)
+
+【194】encoding_layer 以前是双向神经网络，注意的是双向神经网络最后输出需要连接，连接维度通常是最后一维
+						现在是单向神经网络，就是lstm单元和dropout单元组成。
+						输出：enc_output (?, ?, 256)  enc_state (?, 256) 注意输出和状态不一样。
+					
+【196】decoding输入：dec_input 这里只是将target 最后一个元素去掉 同时在开头的地方加上<go>对应的数字 (?, ?)
+		dec_embed_input word_to_vector 这里维度是 (?, ?, 300)
+		
+【200】decoding_layer 以前的加上了（Bahdanau）的注意力机制，但是没走通，
+						新的没有加注意力机制，就是和encoder一样，是lstm和dropout连接单元组成
+		当上面完成之后，接下来需要分训练和测试两种情况讨论，训练的输入直接用target输入，而测试时的输入是RNN神经单元
+		前一整体单元的输出。这个地方用到了variable_scope('decode')
+		
+		输入有：encoder端输出的状态，decoder端的基本单元，decoder端的输入，decoder端的最后全连接层
+		training_decoding_layer
+		和
+		inference_decoding_layer 的输出都是 输出是下面的decoder_outputs
+		
+  # 调用dynamic_decode进行解码，decoder_outputs是一个namedtuple，里面包含两项(rnn_outputs, sample_id)
+                # rnn_output: [batch_size, decoder_targets_length, vocab_size]，保存decode每个时刻每个单词的概率，可以用来计算loss
+                # sample_id: [batch_size], tf.int32，保存最终的编码结果。可以表示最后的答案
+                # decoder_outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(decoder=training_decoder,
+				# 其中第二个_ 输出是0, 1 0是由 c, h 组成，其中c和h的shape是[?, 256] 同理1也是
+				# 其中第三个_ 输出shape是 [?, ]
+
+【268】运用training_logits和targets 以及 masks 计算 交叉熵损失 最终得出 train_op 
+
+【283】开始训练网络，设置初始值：
+start = 200000
+end = start + 50000
+sorted_summaries_short = sorted_summaries[start: end]
+sorted_texts_short = sorted_texts[start: end]
+print('The shortest text length: ', len(sorted_summaries_short[0]))
+print('The longest text length: ', len(sorted_texts_short[-1]))
+
+# Train the Model
+learning_rate_decay = 0.95
+min_learning_rate = 0.0005
+display_step = 20 # Check training loss after every 20 batches
+stop_early = 0
+stop = 3 # If the update loss does not decrease in 3 consecutive update checks, stop training
+per_epoch = 3 # Make 3 update checks per epoch
+update_check = (len(sorted_texts_short) // batch_size // per_epoch) - 1
+
+update_loss = 0
+batch_loss = 0
+
+备注：sorted_summaries_short只是取了sorted_summaries中的一部分。 20万 到 20万5
+
+【316】设置循环：
+内部取得 get_batches 返回 注意：summaries_batch, texts_batch, summary_lengths, texts_lengths
+summaries_batch：[[22, 11, ..], [1, 31, 23, ..] ...] 但是都是等长的。(64, 13)
+同理 texts_batch: (64, 26)
+summary_lengths: (64, )  = [13, 13, 13 ...]
+texts_lengths: (64, )  = [26, 26, 26 ...]
+
+【328】下面展示的大概逻辑是这样的：展示：如果达到一定step就展示。 保存/打印新纪录：如果新的损失要更小，则
+打印新纪录，并保存模型。   结束：如果连续三次损失都没有更新的更好，则断掉训练。
+
+
+
+【测试效果】
+InferenceTest.py文件说明：
+【31】首先： text是从clean_texts中随机选取的一个。 text  [21, 23, 52, ... ] 这个是43个长度
+
+【48】直接放在前向计算的地方就可以了，输出是 也是 [21, 23, 52, ... ] 类似这样的序列，解码就可以了。
+注意：
+answer_logits = sess.run(logits, {input_data: [text] * batch_size, summary_length: [np.random.randint(5, 8)],
+                                      text_length: [len(text)] * batch_size, keep_prob: 1.0})[0]
+这个地方末尾有个0，不是很了解。以及需要的placeholder，需要根据计算logits需要哪些。
+
+		
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
